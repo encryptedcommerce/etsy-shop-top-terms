@@ -1,0 +1,154 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>nlp_utils &#8212; Etsy Shop Top Terms  documentation</title>
+    <link rel="stylesheet" href="../_static/classic.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript" id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../_static/jquery.js"></script>
+    <script type="text/javascript" src="../_static/underscore.js"></script>
+    <script type="text/javascript" src="../_static/doctools.js"></script>
+    <script type="text/javascript" src="../_static/language_data.js"></script>
+    
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Etsy Shop Top Terms  documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for nlp_utils</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">nltk</span> <span class="k">import</span> <span class="n">download</span>
+<span class="kn">from</span> <span class="nn">nltk.tokenize</span> <span class="k">import</span> <span class="n">word_tokenize</span>
+<span class="kn">from</span> <span class="nn">nltk.stem</span> <span class="k">import</span> <span class="n">PorterStemmer</span><span class="p">,</span> <span class="n">LancasterStemmer</span><span class="p">,</span> <span class="n">WordNetLemmatizer</span>
+
+<span class="k">def</span> <span class="nf">update_nltk_resources</span><span class="p">(</span><span class="n">debug</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+    <span class="n">quiet</span> <span class="o">=</span> <span class="ow">not</span> <span class="n">debug</span>
+    <span class="n">download</span><span class="p">(</span><span class="s1">&#39;punkt&#39;</span><span class="p">,</span> <span class="n">quiet</span><span class="o">=</span><span class="n">quiet</span><span class="p">)</span>
+    <span class="n">download</span><span class="p">(</span><span class="s1">&#39;wordnet&#39;</span><span class="p">,</span> <span class="n">quiet</span><span class="o">=</span><span class="n">quiet</span><span class="p">)</span>
+    <span class="n">download</span><span class="p">(</span><span class="s1">&#39;stopwords&#39;</span><span class="p">,</span> <span class="n">quiet</span><span class="o">=</span><span class="n">quiet</span><span class="p">)</span>
+    <span class="n">download</span><span class="p">(</span><span class="s1">&#39;averaged_perceptron_tagger&#39;</span><span class="p">,</span> <span class="n">quiet</span><span class="o">=</span><span class="n">quiet</span><span class="p">)</span>
+
+<div class="viewcode-block" id="provision_tokenizer"><a class="viewcode-back" href="../nlp_utils.html#nlp_utils.provision_tokenizer">[docs]</a><span class="k">def</span> <span class="nf">provision_tokenizer</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;Provides the Punkt word tokenizer.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        function: The Punk word tokenizer.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">word_tokenize</span></div>
+
+<div class="viewcode-block" id="provision_stemmer"><a class="viewcode-back" href="../nlp_utils.html#nlp_utils.provision_stemmer">[docs]</a><span class="k">def</span> <span class="nf">provision_stemmer</span><span class="p">(</span><span class="n">stemmer</span><span class="o">=</span><span class="s1">&#39;porter&#39;</span><span class="p">,</span> <span class="n">debug</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Provides the specified stemmer.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        nltk.stem.porter.PorterStemmer or nltk.stem.lancaster.LancasterStemmer: Stemmer.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">stemmer</span> <span class="o">=</span> <span class="n">stemmer</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">debug</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="s1">&#39;Selecting </span><span class="si">{stemmer}</span><span class="s1"> as the stemming algorithm.&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">stemmer</span> <span class="o">==</span> <span class="s1">&#39;porter&#39;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">PorterStemmer</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">stemmer</span> <span class="o">==</span> <span class="s1">&#39;lancaster&#39;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">LancasterStemmer</span><span class="p">()</span>
+    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;The specified stemmer is not supported.&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="provision_lemmatizer"><a class="viewcode-back" href="../nlp_utils.html#nlp_utils.provision_lemmatizer">[docs]</a><span class="k">def</span> <span class="nf">provision_lemmatizer</span><span class="p">(</span><span class="n">lexical_db</span><span class="o">=</span><span class="s1">&#39;wordnet&#39;</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Provides a lemmatizer from the WordNet lexical database.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        lexical_db (str): Lexical DB (currently only WordNet is supported).</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        nltk.stem.wordnet.WordNetLemmatizer: WordNet lemmatizer.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">lexical_db</span> <span class="o">=</span> <span class="n">lexical_db</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">lexical_db</span> <span class="o">==</span> <span class="s1">&#39;wordnet&#39;</span><span class="p">:</span>
+        <span class="n">wnl</span> <span class="o">=</span> <span class="n">WordNetLemmatizer</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">wnl</span>
+    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;The specified lexical database is not supported.&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="apply_fn_to_tokenized_phrase"><a class="viewcode-back" href="../nlp_utils.html#nlp_utils.apply_fn_to_tokenized_phrase">[docs]</a><span class="k">def</span> <span class="nf">apply_fn_to_tokenized_phrase</span><span class="p">(</span><span class="n">phrase</span><span class="p">,</span> <span class="n">function</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Tokenizes a phrase and applies a transformation function to each word.</span>
+<span class="sd">    </span>
+<span class="sd">    Args: </span>
+<span class="sd">        phrase (str): The input phrase.</span>
+<span class="sd">        function (function): The function used to transform each word.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        str: the transformed phrase.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">token_words</span> <span class="o">=</span> <span class="n">word_tokenize</span><span class="p">(</span><span class="n">phrase</span><span class="p">)</span>
+    <span class="n">transformed_phrase</span><span class="o">=</span><span class="p">[]</span>
+    <span class="k">for</span> <span class="n">word</span> <span class="ow">in</span> <span class="n">token_words</span><span class="p">:</span>
+        <span class="n">transformed_phrase</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">function</span><span class="p">(</span><span class="n">word</span><span class="p">))</span>
+    <span class="k">return</span> <span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">transformed_phrase</span><span class="p">)</span></div>
+
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h3><a href="../index.html">Table of Contents</a></h3>
+<p class="caption"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../terms.html">Top Terms</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../etsy.html">Etsy API Client</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../nlp_utils.html">NLP Utilities</a></li>
+</ul>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Etsy Shop Top Terms  documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2019, Leonardo Gonzalez.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.8.3.
+    </div>
+  </body>
+</html>

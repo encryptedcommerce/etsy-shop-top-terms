@@ -1,0 +1,192 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Etsy API Client &#8212; Etsy Shop Top Terms  documentation</title>
+    <link rel="stylesheet" href="_static/classic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/language_data.js"></script>
+    
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="NLP Utilities" href="nlp_utils.html" />
+    <link rel="prev" title="Top Terms" href="terms.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="nlp_utils.html" title="NLP Utilities"
+             accesskey="N">next</a> |</li>
+        <li class="right" >
+          <a href="terms.html" title="Top Terms"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">Etsy Shop Top Terms  documentation</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <div class="section" id="etsy-api-client">
+<h1>Etsy API Client<a class="headerlink" href="#etsy-api-client" title="Permalink to this headline">¶</a></h1>
+<dl class="class">
+<dt id="etsy.API_client">
+<em class="property">class </em><code class="descclassname">etsy.</code><code class="descname">API_client</code><span class="sig-paren">(</span><em>verbose</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/etsy.html#API_client"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#etsy.API_client" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="method">
+<dt id="etsy.API_client.check_response">
+<code class="descname">check_response</code><span class="sig-paren">(</span><em>response</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/etsy.html#API_client.check_response"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#etsy.API_client.check_response" title="Permalink to this definition">¶</a></dt>
+<dd><p>Checks REST API response to ensure resource and API key are OK.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="etsy.API_client.get_shop">
+<code class="descname">get_shop</code><span class="sig-paren">(</span><em>shop_name</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/etsy.html#API_client.get_shop"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#etsy.API_client.get_shop" title="Permalink to this definition">¶</a></dt>
+<dd><p>Gets Shop data: title and announcement.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>shop_name</strong> (<em>str</em>) – Shop name.</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body">Shop data including title and announcement.</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body">dict</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="etsy.API_client.get_shop_listings">
+<code class="descname">get_shop_listings</code><span class="sig-paren">(</span><em>lock</em>, <em>shop_name</em>, <em>position</em>, <em>page=1</em>, <em>pbar=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/etsy.html#API_client.get_shop_listings"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#etsy.API_client.get_shop_listings" title="Permalink to this definition">¶</a></dt>
+<dd><p>Retrieves data for an Etsy shop’s listings.</p>
+<p>In case there are more listings than the pagination limit,
+recursively retrieves subsequent pages until all listings are compiled.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>lock</strong> (<em>_thread.lock</em>) – Thead lock for non-thread-safe tqdm progress bar updates.</li>
+<li><strong>shop_name</strong> (<em>str</em>) – Shop name.</li>
+<li><strong>position</strong> (<em>int</em>) – Position in list of names, for positioning of progress bar.</li>
+<li><strong>page</strong> (<em>int</em>) – Page for paginated results.</li>
+<li><strong>pbar</strong> (<em>tqdm._tqdm.tqdm</em>) – Progress bar for listings download.</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first">List of product listings. In recursive calls, also returns next page.</p>
+</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">Return type:</th><td class="field-body"><p class="first last">list or tuple</p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="etsy.API_client.url">
+<code class="descname">url</code><span class="sig-paren">(</span><em>path</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/etsy.html#API_client.url"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#etsy.API_client.url" title="Permalink to this definition">¶</a></dt>
+<dd><p>Provides a URL for making REST API requests.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Returns:</th><td class="field-body">URL containing API root path, API command, and API key.</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Return type:</th><td class="field-body">str</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+</dd></dl>
+
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h3><a href="index.html">Table of Contents</a></h3>
+<p class="caption"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="terms.html">Top Terms</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Etsy API Client</a></li>
+<li class="toctree-l1"><a class="reference internal" href="nlp_utils.html">NLP Utilities</a></li>
+</ul>
+
+  <h4>Previous topic</h4>
+  <p class="topless"><a href="terms.html"
+                        title="previous chapter">Top Terms</a></p>
+  <h4>Next topic</h4>
+  <p class="topless"><a href="nlp_utils.html"
+                        title="next chapter">NLP Utilities</a></p>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="_sources/etsy.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="nlp_utils.html" title="NLP Utilities"
+             >next</a> |</li>
+        <li class="right" >
+          <a href="terms.html" title="Top Terms"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="index.html">Etsy Shop Top Terms  documentation</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2019, Leonardo Gonzalez.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.8.3.
+    </div>
+  </body>
+</html>

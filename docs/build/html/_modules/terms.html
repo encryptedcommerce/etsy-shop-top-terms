@@ -1,0 +1,531 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>terms &#8212; Etsy Shop Top Terms  documentation</title>
+    <link rel="stylesheet" href="../_static/classic.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript" id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../_static/jquery.js"></script>
+    <script type="text/javascript" src="../_static/underscore.js"></script>
+    <script type="text/javascript" src="../_static/doctools.js"></script>
+    <script type="text/javascript" src="../_static/language_data.js"></script>
+    
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Etsy Shop Top Terms  documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="index.html" accesskey="U">Module code</a> &#187;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for terms</h1><div class="highlight"><pre>
+<span></span><span class="ch">#!/usr/bin/env python</span>
+<span class="sd">&quot;&quot;&quot;Given a set of Etsy shops, determine each shop&#39;s top 5 terms.</span>
+
+<span class="sd">To set up environment: `pip install &lt; requirements.txt`</span>
+
+<span class="sd">To build documentation: `cd docs; make html`</span>
+
+<span class="sd">`./terms.py -h` provides usage information with options.</span>
+
+<span class="sd">The full pipeline consists of the following steps:</span>
+
+<span class="sd">1. Download data via Etsy API for shops and their listings.</span>
+
+<span class="sd">2. Extract a list of candidate phrases from each shop&#39;s listings&#39; tags.</span>
+
+<span class="sd">3. Exploit structural information -- make use of title and announcement.</span>
+
+<span class="sd">4. Perform topic modeling on product descriptions with NMF or LDA.</span>
+
+<span class="sd">5. Do a mapping of candidate phrases to topic keywords</span>
+
+<span class="sd">Optionally, the --quick option can be passed to omit steps 4 and 5 and simply return the top stemmed and lemmatized stags.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span> <span class="nn">collections</span> <span class="k">import</span> <span class="n">Counter</span><span class="p">,</span> <span class="n">OrderedDict</span><span class="p">,</span> <span class="n">defaultdict</span>
+<span class="kn">import</span> <span class="nn">argparse</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">from</span> <span class="nn">tabulate</span> <span class="k">import</span> <span class="n">tabulate</span>
+<span class="kn">from</span> <span class="nn">multiprocessing</span> <span class="k">import</span> <span class="n">Pool</span>
+<span class="kn">from</span> <span class="nn">multiprocessing.pool</span> <span class="k">import</span> <span class="n">ThreadPool</span>
+<span class="kn">import</span> <span class="nn">threading</span>
+<span class="kn">from</span> <span class="nn">time</span> <span class="k">import</span> <span class="n">time</span><span class="p">,</span> <span class="n">sleep</span>
+<span class="kn">import</span> <span class="nn">random</span>
+<span class="kn">from</span> <span class="nn">tqdm</span> <span class="k">import</span> <span class="n">tqdm</span><span class="p">,</span> <span class="n">trange</span>
+<span class="kn">from</span> <span class="nn">nltk.tokenize</span> <span class="k">import</span> <span class="n">word_tokenize</span><span class="p">,</span> <span class="n">sent_tokenize</span>
+<span class="kn">import</span> <span class="nn">sklearn</span>
+<span class="kn">from</span> <span class="nn">sklearn.feature_extraction.text</span> <span class="k">import</span> <span class="n">TfidfVectorizer</span><span class="p">,</span> <span class="n">CountVectorizer</span>
+<span class="kn">from</span> <span class="nn">sklearn.decomposition</span> <span class="k">import</span> <span class="n">NMF</span><span class="p">,</span> <span class="n">LatentDirichletAllocation</span>
+<span class="kn">from</span> <span class="nn">sklearn.datasets</span> <span class="k">import</span> <span class="n">fetch_20newsgroups</span>
+<span class="kn">import</span> <span class="nn">etsy</span>
+<span class="kn">import</span> <span class="nn">nlp_utils</span>
+
+<div class="viewcode-block" id="parse_CLI_args"><a class="viewcode-back" href="../terms.html#terms.parse_CLI_args">[docs]</a><span class="k">def</span> <span class="nf">parse_CLI_args</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;Parses CLI arguments for various options.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        argparse.Namespace: Variables from CLI argument parsing.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="s1">&#39;Determine top terms for a set of Etsy shops.&#39;</span><span class="p">)</span>
+    <span class="n">output_group</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">add_mutually_exclusive_group</span><span class="p">()</span>
+    <span class="n">output_group</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--quiet&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;suppress verbose output&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">)</span>
+    <span class="n">output_group</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--debug&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;show extended debugging output&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">)</span>
+    <span class="n">stemmer_group</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">add_mutually_exclusive_group</span><span class="p">()</span>
+    <span class="n">stemmer_group</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--stemmer&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;stemming algorithm&quot;</span><span class="p">,</span> <span class="n">choices</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;porter&#39;</span><span class="p">,</span> <span class="s1">&#39;lancaster&#39;</span><span class="p">])</span>
+    <span class="n">topic_group</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">add_mutually_exclusive_group</span><span class="p">()</span>
+    <span class="n">topic_group</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--quick&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;skip topic modeling&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">)</span>
+    <span class="n">topic_group</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--method&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;topic modeling method&quot;</span><span class="p">,</span> <span class="n">choices</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;NMF&#39;</span><span class="p">,</span> <span class="s1">&#39;LDA&#39;</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="progress_bar_offset"><a class="viewcode-back" href="../terms.html#terms.progress_bar_offset">[docs]</a><span class="k">def</span> <span class="nf">progress_bar_offset</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot; Prints blank lines to scroll down past progress bars.&quot;&quot;&quot;</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">shop_names</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="download_data"><a class="viewcode-back" href="../terms.html#terms.download_data">[docs]</a><span class="k">def</span> <span class="nf">download_data</span><span class="p">(</span><span class="n">shop_names</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Downloads data via Etsy API for shops and their listings.</span>
+
+<span class="sd">    Uses multiprocessing to retrieve multiple shop&#39;s data at a time.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        shop_names (list): Shop names.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        dict: Shop data indexed by shop name</span>
+
+<span class="sd">    Todo:</span>
+<span class="sd">        Cache downloaded data for reprocessing without redownloading.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">t0</span> <span class="o">=</span> <span class="n">time</span><span class="p">()</span>
+    <span class="n">pool</span> <span class="o">=</span> <span class="n">ThreadPool</span><span class="p">(</span><span class="n">N_CONCURRENT_DOWNLOADS</span><span class="p">)</span>
+    <span class="n">lock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span> <span class="c1"># for use with non-thread-safe tqdm updates</span>
+    <span class="k">if</span> <span class="n">verbose</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">()</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;--- Downloding Data for Shop Product Listings ---&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">download_shop_data</span><span class="p">(</span><span class="n">shop_name</span><span class="p">,</span> <span class="n">position</span><span class="p">,</span> <span class="n">lock</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Retrieves data for a specified shop.</span>
+<span class="sd">        </span>
+<span class="sd">        Args:</span>
+<span class="sd">            shop_name (str): Shop name.</span>
+<span class="sd">            position (int): Position in list of names, for positioning of progress bar.</span>
+<span class="sd">            lock (_thread.lock): Thead lock for non-thread-safe tqdm progress bar updates.</span>
+<span class="sd">        Returns:</span>
+<span class="sd">            dict: Shop data including title, announcement, and product listings.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">sleep</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">())</span> <span class="c1"># Random 0-2s delay to avoid surpassing Etsy API rate limits</span>
+        <span class="n">shop</span> <span class="o">=</span> <span class="n">etsy_client</span><span class="o">.</span><span class="n">get_shop</span><span class="p">(</span><span class="n">shop_name</span><span class="p">)[</span><span class="s1">&#39;results&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">announcement</span> <span class="o">=</span> <span class="n">shop</span><span class="p">[</span><span class="s1">&#39;announcement&#39;</span><span class="p">]</span>
+
+        <span class="c1"># Retrieve shop listings data.</span>
+        <span class="n">shop_listings</span> <span class="o">=</span> <span class="n">etsy_client</span><span class="o">.</span><span class="n">get_shop_listings</span><span class="p">(</span><span class="n">lock</span><span class="p">,</span> <span class="n">shop_name</span><span class="p">,</span> <span class="n">position</span><span class="p">)</span>
+        <span class="n">shop_data</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;title&#39;</span><span class="p">:</span> <span class="n">shop</span><span class="p">[</span><span class="s1">&#39;title&#39;</span><span class="p">],</span>
+            <span class="s1">&#39;announcement&#39;</span><span class="p">:</span> <span class="n">shop</span><span class="p">[</span><span class="s1">&#39;announcement&#39;</span><span class="p">],</span>
+            <span class="s1">&#39;listings&#39;</span><span class="p">:</span> <span class="n">shop_listings</span><span class="p">,</span>
+        <span class="p">}</span>
+        <span class="k">return</span> <span class="n">shop_data</span>
+
+    <span class="n">data_by_shop</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">shop_name</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">shop_names</span><span class="p">,</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="n">shop_data</span> <span class="o">=</span> <span class="n">pool</span><span class="o">.</span><span class="n">apply_async</span><span class="p">(</span><span class="n">download_shop_data</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">shop_name</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">lock</span><span class="p">))</span>
+        <span class="n">data_by_shop</span><span class="p">[</span><span class="n">shop_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">shop_data</span>
+    <span class="n">pool</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+    <span class="n">pool</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+
+    <span class="k">for</span> <span class="n">shop_name</span><span class="p">,</span> <span class="n">async_download</span> <span class="ow">in</span> <span class="n">data_by_shop</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">data_by_shop</span><span class="p">[</span><span class="n">shop_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">async_download</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
+
+    <span class="k">if</span> <span class="n">verbose</span><span class="p">:</span>
+        <span class="n">progress_bar_offset</span><span class="p">()</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="s1">&#39;Retrieved all shop data in {int(time() - t0)} seconds.&#39;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">data_by_shop</span></div>
+
+
+<div class="viewcode-block" id="select_top_tags"><a class="viewcode-back" href="../terms.html#terms.select_top_tags">[docs]</a><span class="k">def</span> <span class="nf">select_top_tags</span><span class="p">(</span><span class="n">shop_data</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Extracts a list of candidate phrases from the specified shop&#39;s listings&#39; tags.</span>
+
+<span class="sd">    * Rank by frequency of occurance across a shop&#39;s products</span>
+
+<span class="sd">    * Select top 100 tags</span>
+
+<span class="sd">    * Perform stemming and lemmatizing</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        shop_data (list): Shop and listings data.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        list: The list of tuples containing:</span>
+<span class="sd">            * stemmed and lemmatized top tags,</span>
+<span class="sd">            * tags sorted by frequency (useful for later secondary ranking).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">title</span> <span class="o">=</span> <span class="n">shop_data</span><span class="p">[</span><span class="s1">&#39;title&#39;</span><span class="p">]</span>
+    <span class="n">announcement</span> <span class="o">=</span> <span class="n">shop_data</span><span class="p">[</span><span class="s1">&#39;announcement&#39;</span><span class="p">]</span>
+    <span class="n">shop_listings</span> <span class="o">=</span> <span class="n">shop_data</span><span class="p">[</span><span class="s1">&#39;listings&#39;</span><span class="p">]</span>
+    <span class="c1"># Use listing tags as candidate phrases.</span>
+    <span class="n">product_tags</span> <span class="o">=</span> <span class="p">[</span><span class="n">item</span><span class="p">[</span><span class="s1">&#39;tags&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">shop_listings</span><span class="p">]</span>
+    <span class="n">tags</span> <span class="o">=</span> <span class="p">[</span><span class="n">item</span> <span class="k">for</span> <span class="n">tags</span> <span class="ow">in</span> <span class="n">product_tags</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">tags</span><span class="p">]</span>
+    <span class="n">unique_tags</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">tags</span><span class="p">)</span>
+    <span class="n">tags_by_count</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">(</span><span class="n">tags</span><span class="p">)</span>
+    <span class="c1"># The shop&#39;s 100 most common tags will be the starting point for candidate phrases</span>
+    <span class="n">top_100_tags</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">tags_by_count</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">kv</span><span class="p">:</span> <span class="n">kv</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">reverse</span><span class="o">=</span><span class="kc">True</span><span class="p">)[:</span><span class="mi">100</span><span class="p">]</span>
+
+    <span class="c1"># Perform stemming to reduce redundancy in tags.</span>
+    <span class="n">top_tags_by_stem</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="c1"># Reverse ordering of top tags so that more common tags will override less common ones with the same stem.</span>
+    <span class="k">for</span> <span class="n">tag</span><span class="p">,</span> <span class="n">count</span> <span class="ow">in</span> <span class="nb">reversed</span><span class="p">(</span><span class="n">top_100_tags</span><span class="p">):</span>
+        <span class="c1"># Stem each word in the tag</span>
+        <span class="n">stem</span> <span class="o">=</span> <span class="n">nlp_utils</span><span class="o">.</span><span class="n">apply_fn_to_tokenized_phrase</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">stemmer</span><span class="o">.</span><span class="n">stem</span><span class="p">)</span>
+        <span class="n">top_tags_by_stem</span><span class="p">[</span><span class="n">stem</span><span class="p">]</span> <span class="o">=</span> <span class="n">tag</span>
+
+    <span class="c1"># Perform lemmatizing to further reduce redundancy in tags.</span>
+    <span class="n">top_tags_by_lemma</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="c1"># Sort stem:tag dict by increasing tag count</span>
+    <span class="c1"># so that more common tags will override less common ones with the same lemma.</span>
+    <span class="n">sorted_top_tags_by_stem</span> <span class="o">=</span> <span class="n">OrderedDict</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="n">top_tags_by_stem</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="n">tags_by_count</span><span class="p">[</span><span class="n">t</span><span class="p">]))</span>
+    <span class="k">for</span> <span class="n">stem</span><span class="p">,</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">sorted_top_tags_by_stem</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="c1"># Lemmatize each word in the tag.</span>
+        <span class="n">lemma</span> <span class="o">=</span> <span class="n">nlp_utils</span><span class="o">.</span><span class="n">apply_fn_to_tokenized_phrase</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">lemmatizer</span><span class="o">.</span><span class="n">lemmatize</span><span class="p">)</span>
+        <span class="n">top_tags_by_lemma</span><span class="p">[</span><span class="n">lemma</span><span class="p">]</span> <span class="o">=</span> <span class="n">tag</span>
+    <span class="c1">#shop_top_tags[shop_name] = (top_tags_by_lemma, tags_by_count)</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">top_tags_by_lemma</span><span class="p">,</span> <span class="n">tags_by_count</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="exploit_structural_info"><a class="viewcode-back" href="../terms.html#terms.exploit_structural_info">[docs]</a><span class="k">def</span> <span class="nf">exploit_structural_info</span><span class="p">(</span><span class="n">shop_name_and_tags</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Re-ranks a shop&#39;s top 100 tags based on:</span>
+<span class="sd">        * Tag contains a word present in shop announcement AND shop title.</span>
+<span class="sd">        * Tag contains a word present in shop title.</span>
+<span class="sd">        * Tag contains a word present in shop announcement.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        shop_name_and_tags (tuple):</span>
+<span class="sd">            * shop name (str) for selecting shop data from data_by_shop.</span>
+<span class="sd">            * shop tags (tuple) two lists</span>
+<span class="sd">                - stemmed and lemmatized top tags,</span>
+<span class="sd">                - tags sorted by frequency (used for secondary ranking).</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        list: List of top tags, reordered by ranking criteria.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">global</span> <span class="n">data_by_shop</span>
+    <span class="n">shop_name</span><span class="p">,</span> <span class="n">shop_tags</span> <span class="o">=</span> <span class="n">shop_name_and_tags</span>
+    <span class="n">shop_data</span> <span class="o">=</span> <span class="n">data_by_shop</span><span class="p">[</span><span class="n">shop_name</span><span class="p">]</span>
+    <span class="n">title</span> <span class="o">=</span> <span class="n">shop_data</span><span class="p">[</span><span class="s1">&#39;title&#39;</span><span class="p">]</span>
+    <span class="n">announcement</span> <span class="o">=</span> <span class="n">shop_data</span><span class="p">[</span><span class="s1">&#39;announcement&#39;</span><span class="p">]</span>
+    <span class="n">top_tags_by_lemma</span><span class="p">,</span> <span class="n">tags_by_count</span> <span class="o">=</span> <span class="n">shop_tags</span>
+    <span class="n">title_tags</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">lemma</span><span class="p">,</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">top_tags_by_lemma</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">word</span> <span class="ow">in</span> <span class="n">word_tokenize</span><span class="p">(</span><span class="n">tag</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">word</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="ow">in</span> <span class="n">title</span><span class="o">.</span><span class="n">lower</span><span class="p">():</span>
+                <span class="n">title_tags</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+    <span class="n">announcement_tags</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">lemma</span><span class="p">,</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">top_tags_by_lemma</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">tag</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="ow">in</span> <span class="n">announcement</span><span class="o">.</span><span class="n">lower</span><span class="p">():</span>
+            <span class="n">announcement_tags</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+    <span class="n">title_announcement_tags</span> <span class="o">=</span> <span class="n">title_tags</span><span class="o">.</span><span class="n">intersection</span><span class="p">(</span><span class="n">announcement_tags</span><span class="p">)</span>
+
+    <span class="c1"># Create a sorted (by tag count) list of each set, and concatenate them according to ranking criteria.</span>
+    <span class="n">title_tags</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span>
+        <span class="nb">list</span><span class="p">(</span><span class="n">title_tags</span><span class="o">.</span><span class="n">difference</span><span class="p">(</span><span class="n">title_announcement_tags</span><span class="p">)),</span>
+        <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="n">tags_by_count</span><span class="p">[</span><span class="n">t</span><span class="p">],</span> <span class="n">reverse</span><span class="o">=</span><span class="kc">True</span>
+    <span class="p">)</span>
+    <span class="n">announcement_tags</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span>
+        <span class="nb">list</span><span class="p">(</span><span class="n">announcement_tags</span><span class="o">.</span><span class="n">difference</span><span class="p">(</span><span class="n">title_announcement_tags</span><span class="p">)),</span>
+        <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="n">tags_by_count</span><span class="p">[</span><span class="n">t</span><span class="p">],</span> <span class="n">reverse</span><span class="o">=</span><span class="kc">True</span>
+    <span class="p">)</span>
+    <span class="n">title_announcement_tags</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span>
+        <span class="nb">list</span><span class="p">(</span><span class="n">title_announcement_tags</span><span class="p">),</span>
+        <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="n">tags_by_count</span><span class="p">[</span><span class="n">t</span><span class="p">],</span> <span class="n">reverse</span><span class="o">=</span><span class="kc">True</span>
+    <span class="p">)</span>
+    <span class="n">ranked_tags</span> <span class="o">=</span> <span class="n">title_announcement_tags</span> <span class="o">+</span> <span class="n">title_tags</span> <span class="o">+</span> <span class="n">announcement_tags</span>
+
+    <span class="c1"># As a fail-safe for shops that have blank titles and announcements, append the rest of the tags</span>
+    <span class="n">ranked_tags</span> <span class="o">+=</span> <span class="p">[</span><span class="n">tag</span> <span class="k">for</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">top_tags_by_lemma</span><span class="o">.</span><span class="n">values</span><span class="p">()</span> <span class="k">if</span> <span class="n">tag</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">ranked_tags</span><span class="p">]</span>
+
+    <span class="k">return</span> <span class="n">ranked_tags</span></div>
+
+
+<div class="viewcode-block" id="perform_topic_modeling"><a class="viewcode-back" href="../terms.html#terms.perform_topic_modeling">[docs]</a><span class="k">def</span> <span class="nf">perform_topic_modeling</span><span class="p">(</span><span class="n">data_by_shop</span><span class="p">,</span> <span class="n">method</span><span class="o">=</span><span class="s1">&#39;NMF&#39;</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; Performs topic modeling on product descriptions using one of two methods:</span>
+<span class="sd">        Non-negative Matrix Factorization or Latent Dirichlet Allocation.</span>
+
+<span class="sd">    With default configuration:</span>
+<span class="sd">        * Extracts N_TOPICS = N_TOP_TERMS = 5</span>
+<span class="sd">        * Selects top N_TOP_WORDS = 20 keywords for each topic</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        data_by_shop (dict): Shop data indexed by shop name</span>
+<span class="sd">        method (str): Topic modeling method, &#39;NMF&#39; or &#39;LDA&#39;</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        dict: Lists of shop topics (which are each lists of words), indexed by shop name</span>
+
+<span class="sd">    Todo:</span>
+<span class="sd">        Make use of mutual information across shops.</span>
+
+<span class="sd">        Parallelize.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">shop_topics</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">if</span> <span class="n">verbose</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">debug</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">()</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="s1">&#39;Performing automatic topic modeling from product listings, using </span><span class="si">{topic_modeling_method}</span><span class="s1"> method:&#39;</span><span class="p">)</span>
+        <span class="n">pbar</span> <span class="o">=</span> <span class="n">tqdm</span><span class="p">(</span><span class="n">total</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">data_by_shop</span><span class="p">))</span>
+
+    <span class="k">for</span> <span class="n">shop_name</span><span class="p">,</span> <span class="n">shop_data</span> <span class="ow">in</span> <span class="n">data_by_shop</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">product_descriptions</span> <span class="o">=</span> <span class="p">[</span><span class="n">item</span><span class="p">[</span><span class="s1">&#39;description&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">shop_data</span><span class="p">[</span><span class="s1">&#39;listings&#39;</span><span class="p">]]</span>
+
+        <span class="k">if</span> <span class="n">method</span> <span class="o">==</span> <span class="s1">&#39;LDA&#39;</span><span class="p">:</span>
+            <span class="c1"># Use TF vectorizer for LDA</span>
+            <span class="n">vectorizer</span> <span class="o">=</span> <span class="n">CountVectorizer</span><span class="p">(</span><span class="n">max_df</span><span class="o">=</span><span class="mf">0.95</span><span class="p">,</span> <span class="n">min_df</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">max_features</span><span class="o">=</span><span class="n">N_FEATURES</span><span class="p">,</span> <span class="n">stop_words</span><span class="o">=</span><span class="s1">&#39;english&#39;</span><span class="p">)</span>
+            <span class="n">model</span> <span class="o">=</span> <span class="n">LatentDirichletAllocation</span><span class="p">(</span>
+                <span class="n">n_components</span><span class="o">=</span><span class="n">N_TOPICS</span><span class="p">,</span> <span class="n">max_iter</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">learning_method</span><span class="o">=</span><span class="s1">&#39;online&#39;</span><span class="p">,</span> <span class="n">learning_offset</span><span class="o">=</span><span class="mf">50.</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">0</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># Use TF-IDF vectorizer for NMF</span>
+            <span class="n">vectorizer</span> <span class="o">=</span> <span class="n">TfidfVectorizer</span><span class="p">(</span><span class="n">max_df</span><span class="o">=</span><span class="mf">0.95</span><span class="p">,</span> <span class="n">min_df</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">max_features</span><span class="o">=</span><span class="n">N_FEATURES</span><span class="p">,</span> <span class="n">stop_words</span><span class="o">=</span><span class="s1">&#39;english&#39;</span><span class="p">)</span>
+            <span class="n">model</span> <span class="o">=</span> <span class="n">NMF</span><span class="p">(</span><span class="n">n_components</span><span class="o">=</span><span class="n">N_TOPICS</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=.</span><span class="mi">1</span><span class="p">,</span> <span class="n">l1_ratio</span><span class="o">=.</span><span class="mi">5</span><span class="p">)</span>
+        <span class="n">feature_vector</span> <span class="o">=</span> <span class="n">vectorizer</span><span class="o">.</span><span class="n">fit_transform</span><span class="p">(</span><span class="n">product_descriptions</span><span class="p">)</span>
+        <span class="n">model</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">feature_vector</span><span class="p">)</span>
+        <span class="n">feature_names</span> <span class="o">=</span> <span class="n">vectorizer</span><span class="o">.</span><span class="n">get_feature_names</span><span class="p">()</span>
+        <span class="n">topic_top_words</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="n">debug</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;-&#39;</span> <span class="o">*</span> <span class="mi">40</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="s1">&#39;Topics for </span><span class="si">{shop_name}</span><span class="s1">:&#39;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">topic_idx</span><span class="p">,</span> <span class="n">topic</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">components_</span><span class="p">):</span>
+            <span class="n">top_words</span> <span class="o">=</span> <span class="p">[</span><span class="n">feature_names</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">topic</span><span class="o">.</span><span class="n">argsort</span><span class="p">()[:</span><span class="o">-</span><span class="n">N_TOP_WORDS</span> <span class="o">-</span> <span class="mi">1</span><span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">]]</span>
+            <span class="n">topic_top_words</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">top_words</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">debug</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="s1">&#39;Topic #</span><span class="si">{topic_idx}</span><span class="s1">: &#39;</span> <span class="o">+</span> <span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">top_words</span><span class="p">))</span>
+        <span class="n">shop_topics</span><span class="p">[</span><span class="n">shop_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">topic_top_words</span>
+        <span class="k">if</span> <span class="n">verbose</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">debug</span><span class="p">:</span>
+            <span class="n">pbar</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
+            <span class="n">pbar</span><span class="o">.</span><span class="n">refresh</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">verbose</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">debug</span><span class="p">:</span>
+        <span class="n">pbar</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">shop_topics</span></div>
+
+<div class="viewcode-block" id="compare_tags_to_topic_terms"><a class="viewcode-back" href="../terms.html#terms.compare_tags_to_topic_terms">[docs]</a><span class="k">def</span> <span class="nf">compare_tags_to_topic_terms</span><span class="p">(</span><span class="n">shop_name</span><span class="p">,</span> <span class="n">position</span><span class="p">,</span> <span class="n">tags</span><span class="p">,</span> <span class="n">topics</span><span class="p">,</span> <span class="n">lock</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; Does a mapping of candidate phrases (tags) to topic keywords.</span>
+
+<span class="sd">    * Scans for matches of tags in order of their ranking.</span>
+
+<span class="sd">    * Scans topics for matches of each given tag.</span>
+
+<span class="sd">      - Does a serpentine scanning of topics, in order to maintain balance across topics.</span>
+
+<span class="sd">      - Identifies tags that match a topic word.</span>
+
+<span class="sd">    * Stops when N_TOP_TERMS tags have been identified.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        shop_name (str): Shop name.</span>
+<span class="sd">        position (int): Position in list of names, for positioning of progress bar.</span>
+<span class="sd">        tags (list): Ranked list of tags for the shop.</span>
+<span class="sd">        topics (list): List of the shop&#39;s topics (which are each lists of words)</span>
+<span class="sd">        lock (_thread.lock): Thead lock for non-thread-safe tqdm progress bar updates.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        list: Tags that match the shop&#39;s topic, padded with tags if less than N_TOP_TERMS.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">topic_indices</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">N_TOPICS</span><span class="p">))</span>
+    <span class="n">serpentine_indices</span> <span class="o">=</span> <span class="p">(</span><span class="n">topic_indices</span> <span class="o">+</span> <span class="nb">list</span><span class="p">(</span><span class="nb">reversed</span><span class="p">(</span><span class="n">topic_indices</span><span class="p">)))</span> <span class="o">*</span> <span class="mi">10</span>
+    <span class="sd">&quot;&quot;&quot; serpentine indices (e.g.: 0,1,2,3,4,4,3,2,1,0...) are used to evenly distribute ranked tags to topics&quot;&quot;&quot;</span>
+
+    <span class="n">matching_tags</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">if</span> <span class="n">verbose</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">debug</span><span class="p">:</span>
+        <span class="n">pbar</span> <span class="o">=</span> <span class="n">tqdm</span><span class="p">(</span>
+            <span class="n">total</span><span class="o">=</span><span class="n">N_TOP_TERMS</span><span class="p">,</span>
+            <span class="n">desc</span><span class="o">=</span><span class="s1">&#39;</span><span class="si">{0: &lt;21}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">shop_name</span><span class="p">),</span>
+            <span class="n">position</span><span class="o">=</span><span class="n">position</span>
+        <span class="p">)</span>
+    <span class="k">for</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">tags</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">debug</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="s1">&#39;    Searching </span><span class="si">{shop_name}</span><span class="s1"> topic for </span><span class="si">{tag}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="n">match_found</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">for</span> <span class="n">topic_idx</span> <span class="ow">in</span> <span class="n">serpentine_indices</span><span class="p">:</span>
+            <span class="n">topic</span> <span class="o">=</span> <span class="n">topics</span><span class="p">[</span><span class="n">topic_idx</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">topic_word</span> <span class="ow">in</span> <span class="n">topic</span><span class="p">:</span>
+                <span class="n">tag_stem</span> <span class="o">=</span> <span class="n">nlp_utils</span><span class="o">.</span><span class="n">apply_fn_to_tokenized_phrase</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">stemmer</span><span class="o">.</span><span class="n">stem</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">tag_word</span> <span class="ow">in</span> <span class="n">word_tokenize</span><span class="p">(</span><span class="n">tag_stem</span><span class="p">):</span>
+                    <span class="k">if</span> <span class="n">tag_word</span> <span class="o">==</span> <span class="n">stemmer</span><span class="o">.</span><span class="n">stem</span><span class="p">(</span><span class="n">topic_word</span><span class="p">):</span>
+                        <span class="k">if</span> <span class="n">tag</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">matching_tags</span><span class="p">:</span>
+                            <span class="n">matching_tags</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
+                            <span class="n">match_found</span> <span class="o">=</span> <span class="kc">True</span>
+                            <span class="k">if</span> <span class="n">verbose</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">debug</span><span class="p">:</span>
+                                <span class="k">with</span> <span class="n">lock</span><span class="p">:</span>
+                                    <span class="n">pbar</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
+                                    <span class="n">pbar</span><span class="o">.</span><span class="n">refresh</span><span class="p">()</span>
+                        <span class="k">break</span>
+                <span class="k">if</span> <span class="n">match_found</span><span class="p">:</span>
+                    <span class="k">break</span>
+            <span class="k">if</span> <span class="n">match_found</span><span class="p">:</span>
+                <span class="k">break</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">matching_tags</span><span class="p">)</span> <span class="o">==</span> <span class="n">N_TOP_TERMS</span><span class="p">:</span>
+            <span class="k">break</span>
+
+    <span class="c1"># As a fail-safe, if not enough matching tags have been found, append some extra tags</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">matching_tags</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">N_TOP_TERMS</span><span class="p">:</span>
+        <span class="n">extra_tags</span> <span class="o">=</span> <span class="p">[</span><span class="n">tag</span> <span class="k">for</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">tags</span> <span class="k">if</span> <span class="n">tag</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">matching_tags</span><span class="p">][:</span><span class="n">N_TOP_TERMS</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">matching_tags</span><span class="p">)]</span>
+        <span class="n">matching_tags</span> <span class="o">+=</span> <span class="n">extra_tags</span>
+        <span class="k">if</span> <span class="n">verbose</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">debug</span><span class="p">:</span>
+            <span class="k">with</span> <span class="n">lock</span><span class="p">:</span>
+                <span class="n">pbar</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">extra_tags</span><span class="p">))</span>
+                <span class="n">pbar</span><span class="o">.</span><span class="n">refresh</span><span class="p">()</span>
+
+    <span class="k">if</span> <span class="n">verbose</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">debug</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">lock</span><span class="p">:</span>
+            <span class="n">pbar</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">matching_tags</span></div>
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+    <span class="n">shop_names</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="s1">&#39;ClassicMetalSigns&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;QuoteMyWall&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;BabyLoveUK&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;LovelyBabyPhotoProps&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;KennedyClaireCouture&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;MalizBIJOUX&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;JewelsByMoonli&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;FranJohnsonHouse&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;MadMarchMoon&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;FerkosFineJewelry&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;mimetik&#39;</span><span class="p">,</span>
+    <span class="p">]</span>
+
+    <span class="n">N_FEATURES</span> <span class="o">=</span> <span class="mi">1000</span>
+    <span class="n">N_TOPICS</span> <span class="o">=</span> <span class="mi">5</span>
+    <span class="n">N_TOP_WORDS</span> <span class="o">=</span> <span class="mi">20</span>
+    <span class="n">N_TOP_TERMS</span> <span class="o">=</span> <span class="mi">5</span>
+    <span class="n">N_CONCURRENT_DOWNLOADS</span> <span class="o">=</span> <span class="mi">5</span>
+
+    <span class="c1"># Process CLI arguments</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">parse_CLI_args</span><span class="p">()</span>
+    <span class="n">debug</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">debug</span>
+    <span class="n">verbose</span> <span class="o">=</span> <span class="p">(</span><span class="ow">not</span> <span class="n">args</span><span class="o">.</span><span class="n">quiet</span><span class="p">)</span> <span class="ow">or</span> <span class="n">debug</span>
+    <span class="n">quick_run</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">quick</span>
+    <span class="n">stemming_algorithm</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">stemmer</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">stemmer</span> <span class="k">else</span> <span class="s1">&#39;porter&#39;</span>
+    <span class="n">topic_modeling_method</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">method</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span> <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">method</span> <span class="k">else</span> <span class="s1">&#39;NMF&#39;</span>
+
+    <span class="c1"># Set up stemming and lemmatizing</span>
+    <span class="n">nlp_utils</span><span class="o">.</span><span class="n">update_nltk_resources</span><span class="p">(</span><span class="n">debug</span><span class="p">)</span>
+    <span class="n">stemmer</span> <span class="o">=</span> <span class="n">nlp_utils</span><span class="o">.</span><span class="n">provision_stemmer</span><span class="p">(</span><span class="n">stemming_algorithm</span><span class="p">,</span> <span class="n">debug</span><span class="p">)</span>
+    <span class="n">lemmatizer</span> <span class="o">=</span> <span class="n">nlp_utils</span><span class="o">.</span><span class="n">provision_lemmatizer</span><span class="p">(</span><span class="s1">&#39;wordnet&#39;</span><span class="p">)</span>
+
+
+    <span class="c1"># Download shop/listings data</span>
+    <span class="n">etsy_client</span> <span class="o">=</span> <span class="n">etsy</span><span class="o">.</span><span class="n">API_client</span><span class="p">(</span><span class="n">verbose</span><span class="p">)</span>
+    <span class="n">data_by_shop</span> <span class="o">=</span> <span class="n">download_data</span><span class="p">(</span><span class="n">shop_names</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">shop_name</span><span class="p">,</span> <span class="n">shop_data</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">data_by_shop</span><span class="o">.</span><span class="n">items</span><span class="p">()):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">shop_data</span><span class="p">[</span><span class="s1">&#39;listings&#39;</span><span class="p">]:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="s1">&#39;WARNING: Shop </span><span class="si">{shop_name}</span><span class="s1"> has no active listings -- excluding it from processing.&#39;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">()</span>
+            <span class="k">del</span> <span class="n">data_by_shop</span><span class="p">[</span><span class="n">shop_name</span><span class="p">]</span>
+
+    <span class="c1"># Process data</span>
+    <span class="n">t0</span> <span class="o">=</span> <span class="n">time</span><span class="p">()</span>
+    <span class="k">with</span> <span class="n">Pool</span><span class="p">()</span> <span class="k">as</span> <span class="n">p</span><span class="p">:</span>
+        <span class="n">shop_names</span> <span class="o">=</span> <span class="n">data_by_shop</span><span class="o">.</span><span class="n">keys</span><span class="p">()</span>
+        <span class="n">top_tags</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">select_top_tags</span><span class="p">,</span> <span class="p">[</span><span class="n">data_by_shop</span><span class="p">[</span><span class="n">shop_name</span><span class="p">]</span> <span class="k">for</span> <span class="n">shop_name</span> <span class="ow">in</span> <span class="n">shop_names</span><span class="p">])</span>
+        <span class="n">shop_top_tags</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">shop_names</span><span class="p">,</span> <span class="n">top_tags</span><span class="p">))</span>
+        <span class="n">ranked_tags</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">exploit_structural_info</span><span class="p">,</span> <span class="n">shop_top_tags</span><span class="o">.</span><span class="n">items</span><span class="p">())</span>
+        <span class="n">shop_ranked_tags</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">shop_names</span><span class="p">,</span> <span class="n">ranked_tags</span><span class="p">))</span>
+
+    <span class="k">if</span> <span class="n">quick_run</span><span class="p">:</span>
+        <span class="n">top_terms</span> <span class="o">=</span> <span class="p">{</span> <span class="n">shop_name</span><span class="p">:</span> <span class="n">shop_ranked_tags</span><span class="p">[</span><span class="n">shop_name</span><span class="p">][:</span><span class="mi">5</span><span class="p">]</span> <span class="k">for</span> <span class="n">shop_name</span> <span class="ow">in</span> <span class="n">shop_ranked_tags</span> <span class="p">}</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">shop_topics</span> <span class="o">=</span> <span class="n">perform_topic_modeling</span><span class="p">(</span><span class="n">data_by_shop</span><span class="p">,</span> <span class="n">method</span><span class="o">=</span><span class="n">topic_modeling_method</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">verbose</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">()</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="s1">&#39;Matching product listing tags against words selected from topic modeling:&#39;</span><span class="p">)</span>
+
+        <span class="n">pool</span> <span class="o">=</span> <span class="n">ThreadPool</span><span class="p">(</span><span class="n">N_CONCURRENT_DOWNLOADS</span><span class="p">)</span>
+        <span class="n">lock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span> <span class="c1"># for use with non-thread-safe tqdm updates</span>
+        <span class="n">shop_matching_tags</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">shop_name</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">shop_topics</span><span class="p">,</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="n">tags</span> <span class="o">=</span> <span class="n">shop_ranked_tags</span><span class="p">[</span><span class="n">shop_name</span><span class="p">]</span>
+            <span class="n">topics</span> <span class="o">=</span> <span class="n">shop_topics</span><span class="p">[</span><span class="n">shop_name</span><span class="p">]</span>
+            <span class="n">input_args</span> <span class="o">=</span> <span class="p">(</span><span class="n">shop_name</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">tags</span><span class="p">,</span> <span class="n">topics</span><span class="p">,</span> <span class="n">lock</span><span class="p">)</span>
+            <span class="n">shop_matching_tags</span><span class="p">[</span><span class="n">shop_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">pool</span><span class="o">.</span><span class="n">apply_async</span><span class="p">(</span><span class="n">compare_tags_to_topic_terms</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="n">input_args</span><span class="p">)</span>
+        <span class="n">pool</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+        <span class="n">pool</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+
+        <span class="k">for</span> <span class="n">shop_name</span><span class="p">,</span> <span class="n">async_matches</span> <span class="ow">in</span> <span class="n">shop_matching_tags</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">shop_matching_tags</span><span class="p">[</span><span class="n">shop_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">async_matches</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
+
+        <span class="n">top_terms</span> <span class="o">=</span> <span class="p">{</span> <span class="n">shop_name</span><span class="p">:</span> <span class="n">shop_matching_tags</span><span class="p">[</span><span class="n">shop_name</span><span class="p">]</span> <span class="k">for</span> <span class="n">shop_name</span> <span class="ow">in</span> <span class="n">shop_ranked_tags</span> <span class="p">}</span>
+
+        <span class="k">if</span> <span class="n">verbose</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">debug</span><span class="p">:</span>
+            <span class="n">progress_bar_offset</span><span class="p">()</span>
+
+    <span class="c1"># Print output to terminal</span>
+    <span class="k">if</span> <span class="n">verbose</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">()</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">f</span><span class="s1">&#39;Processing complete in {int(time() - t0)} seconds.&#39;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">tabulate</span><span class="p">(</span><span class="n">top_terms</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">headers</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;Shop&#39;</span><span class="p">,</span> <span class="s1">&#39;Top Terms&#39;</span><span class="p">]))</span>
+
+</pre></div>
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h3><a href="../index.html">Table of Contents</a></h3>
+<p class="caption"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../terms.html">Top Terms</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../etsy.html">Etsy API Client</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../nlp_utils.html">NLP Utilities</a></li>
+</ul>
+
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="related navigation">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Etsy Shop Top Terms  documentation</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="index.html" >Module code</a> &#187;</li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+        &#169; Copyright 2019, Leonardo Gonzalez.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.8.3.
+    </div>
+  </body>
+</html>
