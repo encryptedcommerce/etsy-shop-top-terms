@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Given a set of Etsy shops, determine each shop's top 5 terms.
 
-To set up environment: `pip install < requirements.txt`
+To set up environment: `pip install -r requirements.txt`
 
 To build documentation: `cd docs; make html`
 
